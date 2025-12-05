@@ -1,31 +1,52 @@
-# Online Fraud Detection Enterprise Dashboard
+# Online Fraud Detection Dashboard
 
-Streamlit dashboard plus FastAPI backend for a demo fraud detection workflow. The backend serves scoring, metrics, and simulated stream data; the dashboard consumes those endpoints and also reads local sample CSVs.
+**Online Fraud Detection Dashboard** is an end-to-end fraud analytics project built with Python, Streamlit, and machine-learning models.  
+It provides an “executive command center” style UI to explore transactions, run real-time scoring, and analyze model + rule performance.
 
-## Project layout
-- `dashboard/app.py` — primary Streamlit entrypoint (multi-page UI under `dashboard/pages`).
-- `backend/api/main.py` — FastAPI app served by uvicorn.
-- `fraud_lab/dashboard_app.py` — standalone Streamlit experience used for experimentation.
-- `shared/` — styling and data loading helpers shared across apps.
-- `data/` — sample dataset (`transactions_sample.csv`), audit log, and config files. Place your own Kaggle CSV at `data/kaggle/online_fraud.csv` to override the demo data.
+> ⚠️ Note: Large AIML dataset files are **not included** in this repo because of GitHub’s 100 MB limit.  
+> Place your own dataset in the indicated folders to run full experiments.
 
-## Prerequisites
-- Python 3.10+ on Windows
-- PowerShell
+---
 
-## One-step launch (dashboard + API)
-From the project root:
+## 🔍 Key Features
 
-```
-powershell -ExecutionPolicy Bypass -File .\run_all.ps1
-```
+- **Interactive Streamlit dashboard**
+  - Executive overview of fraud risk
+  - Live / batch scoring views
+  - Drill-down into suspicious transactions
+- **ML + rules hybrid approach**
+  - Model-based risk score for each transaction
+  - Rule engine for threshold / business rules
+- **Data pipeline utilities**
+  - Data loading, preprocessing, feature creation
+  - Configurable dataset selection (`dataset_config.json`)
+- **Reusable backend code**
+  - Shared modules for styling, data loading, and pipelines
+  - Ready to connect with a FastAPI / REST scoring service
 
-What the script does:
-- Creates `.venv` if missing and activates it.
-- Installs `requirements.txt` on first run of the venv.
-- Starts FastAPI at `http://127.0.0.1:8000`.
-- Starts Streamlit dashboard at `http://localhost:8502`.
+---
 
-## Notes
-- If you prefer to run manually, activate `.venv`, install `requirements.txt`, then run `uvicorn backend.api.main:app --reload --host 127.0.0.1 --port 8000` in one terminal and `streamlit run dashboard/app.py --server.port 8502` in another.
-- The dashboard falls back to the bundled sample CSV if a Kaggle file is not present.
+## 🧱 Tech Stack
+
+- **Language:** Python 3.x  
+- **Frontend:** Streamlit dashboard  
+- **Data & ML:** pandas, numpy, scikit-learn (and others as listed in `requirements.txt`)  
+- **OS / Dev:** Windows + PowerShell (but can run on any OS with Python)
+
+---
+
+## 📂 Project Structure
+
+```text
+online_fraud_detection_dashboard/
+│
+├─ .streamlit/           # Streamlit config (e.g., upload size)
+├─ backend/              # (Optional) backend / API-related code
+├─ dashboard/            # Extra dashboard utilities (if any)
+├─ data/                 # Sample / small data files, configs
+├─ fraud_lab/            # Main fraud detection logic + Streamlit app
+├─ shared/               # Shared helpers (data loader, styling, etc.)
+│
+├─ README.md             # You are here
+├─ requirements.txt      # Python dependencies
+└─ run_all.ps1           # Convenience script to run the app on Windows

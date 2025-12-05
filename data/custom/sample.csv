@@ -1,0 +1,2 @@
+transaction_id,amount,currency,category,transaction_type,location,device_id,merchant_id,user_id,fraud_label
+T1,100,USD,electronics,purchase,US,D1,M1,U1,0

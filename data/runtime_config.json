@@ -1,0 +1,5 @@
+{
+  "decision_threshold": 0.7,
+  "mode": "strict",
+  "rules_enabled": true
+}

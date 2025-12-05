@@ -1,0 +1,3 @@
+[server]
+# Increase upload limit to ~7 GB (default is 200 MB)
+maxUploadSize = 7000

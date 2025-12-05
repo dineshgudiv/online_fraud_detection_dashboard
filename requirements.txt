@@ -1,0 +1,11 @@
+streamlit
+fastapi
+uvicorn[standard]
+scikit-learn
+pandas
+numpy
+plotly
+pydeck
+networkx
+httpx
+python-dateutil

@@ -7,6 +7,7 @@ Run with:
 from __future__ import annotations
 
 from pathlib import Path
+from io import BytesIO
 from typing import Dict, List, Optional, Tuple
 
 import time
@@ -14,6 +15,7 @@ import time
 import numpy as np
 import pandas as pd
 import plotly.express as px
+import networkx as nx
 import pydeck as pdk
 import streamlit as st
 
@@ -48,11 +50,13 @@ PROJECT_ROOT = HERE.parent
 DEFAULT_DATA_PATH = HERE / "data" / "AIML Dataset.csv"
 # If you rename the file, use that exact name here instead
 FALLBACK_DEMO_PATH = HERE / "data" / "transactions.csv"
+MAX_DASHBOARD_ROWS = 10_000  # cap rows to keep the UI responsive
 
 
 def load_project_dataset() -> pd.DataFrame:
     """Single entry point for loading the main project dataset."""
-    df = get_dataset_from_sidebar()
+    with st.spinner("Loading dataset..."):
+        df = get_dataset_from_sidebar()
     return df
 
 
@@ -218,10 +222,10 @@ def _standardise_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 @st.cache_data
-def _load_transactions_from_csv(path_str: str) -> pd.DataFrame:
-    """Cached CSV loader; path passed as string for caching."""
+def _load_transactions_from_csv(path_str: str, max_rows: int = MAX_DASHBOARD_ROWS) -> pd.DataFrame:
+    """Cached CSV loader; only reads a capped number of rows to avoid long UI stalls."""
     path = Path(path_str)
-    df = pd.read_csv(path)
+    df = pd.read_csv(path, nrows=max_rows)
     df = df.rename(columns={c: c.strip() for c in df.columns})
     df = _standardise_columns(df)
     return df
@@ -435,6 +439,12 @@ def add_risk_columns(df: pd.DataFrame) -> pd.DataFrame:
     ]
     return out
 
+
+@st.cache_data(show_spinner=False)
+def _score_dataset_cached(df: pd.DataFrame) -> pd.DataFrame:
+    """Cache the risk scoring step to avoid recomputing on every navigation change."""
+    return add_risk_columns(df)
+
 # ------------- SESSION STATE -------------
 
 
@@ -493,6 +503,22 @@ def init_model_lab_state() -> None:
         )
     if "model_run_id" not in st.session_state:
         st.session_state.model_run_id = 1
+
+
+def init_cases_state() -> None:
+    if "cases" not in st.session_state:
+        st.session_state.cases = pd.DataFrame(
+            columns=[
+                "case_id",
+                "created_at",
+                "title",
+                "owner",
+                "priority",
+                "status",
+                "tx_ids",
+                "notes",
+            ]
+        )
 
 # ------------- STREAMING HELPERS -------------
 
@@ -1132,7 +1158,7 @@ def page_enhanced_global_fraud_network(df_scored: pd.DataFrame) -> None:
     df_vis = add_visual_columns(df_geo)
 
     st.sidebar.subheader("Map Filters")
-    min_risk = st.sidebar.slider("Minimum risk score", 0.0, 1.0, 0.6, 0.05)
+    min_risk = st.sidebar.slider("Minimum risk score", 0.0, 1.0, 0.4, 0.05)
     bands = st.sidebar.multiselect(
         "Risk bands", ["LOW", "MEDIUM", "HIGH"], default=["MEDIUM", "HIGH"]
     )
@@ -1145,11 +1171,19 @@ def page_enhanced_global_fraud_network(df_scored: pd.DataFrame) -> None:
         & (df_vis["device"].astype(str).isin(sel_devices))
     ]
 
+    # If nothing matches, relax filters automatically to help the user see data
+    auto_relaxed = False
+    if filt.empty and not df_vis.empty:
+        auto_relaxed = True
+        filt = df_vis[df_vis["risk_score"] >= 0.0]
+
     col1, col2 = st.columns([1.6, 1.0])
 
     with col1:
         if filt.empty:
             st.warning("No transactions match current filters.")
+            if auto_relaxed:
+                st.caption("Tried relaxing filters automatically but still no rows.")
         else:
             view_state = pdk.ViewState(
                 latitude=20.0,
@@ -1198,6 +1232,8 @@ def page_enhanced_global_fraud_network(df_scored: pd.DataFrame) -> None:
         if filt.empty:
             st.info("No rows to show.")
         else:
+            if auto_relaxed:
+                st.caption("Filters relaxed automatically to show some data.")
             cols = [
                 "tx_id",
                 "amount",
@@ -1215,26 +1251,102 @@ def page_enhanced_global_fraud_network(df_scored: pd.DataFrame) -> None:
                 height=260,
             )
 
-# Fraud Rings (placeholder)
+# Fraud Rings
 
 
-def page_fraud_rings() -> None:
+def page_fraud_rings(df_scored: pd.DataFrame) -> None:
     st.title("Fraud Rings")
-    st.info(
-        "This section is reserved for network-graph based fraud ring detection "
-        "(card–device–IP relationships). For the current version, we describe the "
-        "design conceptually."
-    )
-    st.markdown(
-        """
-- Build a graph with nodes = **cards, devices, IPs, merchants**.  
-- Draw edges for every transaction.  
-- Identify **clusters** where many confirmed frauds share the same node
-  (e.g., same device being used across multiple cards).  
-- These clusters form **fraud rings** and can be visualised and prioritised
-  for investigation.
-"""
-    )
+
+    # Ensure key columns exist so we can link transactions together
+    df = df_scored.copy()
+    if "tx_id" not in df.columns:
+        df["tx_id"] = [f"TX-{i:06d}" for i in range(len(df))]
+    if "device" not in df.columns:
+        df["device"] = [f"DEVICE-{i % 20:02d}" for i in range(len(df))]
+    if "merchant" not in df.columns:
+        df["merchant"] = [f"MERCHANT-{i % 15:02d}" for i in range(len(df))]
+
+    max_rows = min(len(df), 500)
+    df_small = df.head(max_rows)
+
+    G = nx.Graph()
+    for _, row in df_small.iterrows():
+        tx = str(row["tx_id"])
+        risk = float(row.get("risk_score", 0.0))
+        band = str(row.get("risk_band", "MEDIUM"))
+        G.add_node(tx, kind="tx", risk=risk, band=band, amount=row.get("amount", 0.0))
+
+        for attr, kind in (("device", "device"), ("merchant", "merchant"), ("country", "country")):
+            val = str(row.get(attr, "-"))
+            node_id = f"{kind}:{val}"
+            G.add_node(node_id, kind=kind, value=val)
+            G.add_edge(tx, node_id, weight=1.0 + risk)
+
+    components = sorted(nx.connected_components(G), key=len, reverse=True)
+    comp_summaries = []
+    for idx, comp in enumerate(components[:15], start=1):
+        tx_nodes = [n for n in comp if G.nodes[n].get("kind") == "tx"]
+        device_nodes = {n.split(":", 1)[-1] for n in comp if G.nodes[n].get("kind") == "device"}
+        merchant_nodes = {n.split(":", 1)[-1] for n in comp if G.nodes[n].get("kind") == "merchant"}
+        countries = {n.split(":", 1)[-1] for n in comp if G.nodes[n].get("kind") == "country"}
+        risks = [G.nodes[n].get("risk", 0.0) for n in tx_nodes]
+        bands = [G.nodes[n].get("band", "") for n in tx_nodes]
+        high_frac = (bands.count("HIGH") / len(tx_nodes) * 100.0) if tx_nodes else 0.0
+
+        comp_summaries.append(
+            {
+                "Cluster": f"C{idx}",
+                "Nodes": len(comp),
+                "Tx count": len(tx_nodes),
+                "Devices": len(device_nodes),
+                "Merchants": len(merchant_nodes),
+                "Countries": len(countries),
+                "Avg risk": np.mean(risks) if risks else 0.0,
+                "High %": high_frac,
+                "Sample tx": ", ".join(tx_nodes[:3]),
+            }
+        )
+
+    st.caption(f"Built graph from the first {max_rows:,} rows (tx ↔ device/merchant/country).")
+
+    if not comp_summaries:
+        st.info("No components to display.")
+        return
+
+    summary_df = pd.DataFrame(comp_summaries)
+    st.subheader("Top clusters by size")
+    st.dataframe(summary_df, use_container_width=True, height=320)
+
+    selected = st.selectbox("Inspect cluster", summary_df["Cluster"].tolist())
+    selected_idx = int(selected.lstrip("C")) - 1
+    comp = components[selected_idx]
+    tx_nodes = [n for n in comp if G.nodes[n].get("kind") == "tx"]
+
+    detail_rows = []
+    for n in tx_nodes:
+        attrs = G.nodes[n]
+        detail_rows.append(
+            {
+                "tx_id": n,
+                "risk_score": attrs.get("risk", 0.0),
+                "risk_band": attrs.get("band", ""),
+                "amount": attrs.get("amount", 0.0),
+            }
+        )
+    detail_df = pd.DataFrame(detail_rows).sort_values("risk_score", ascending=False)
+
+    st.subheader(f"Transactions in {selected}")
+    st.dataframe(detail_df, use_container_width=True, height=260)
+
+    st.subheader(f"Connected nodes in {selected}")
+    node_rows = []
+    for n in comp:
+        nd = G.nodes[n]
+        node_rows.append(
+            {"node": n, "kind": nd.get("kind"), "value": nd.get("value", ""), "degree": G.degree[n]}
+        )
+    node_df = pd.DataFrame(node_rows).sort_values("degree", ascending=False)
+    st.dataframe(node_df, use_container_width=True, height=240)
 
 # Fraud Investigation (Manual Review)
 
@@ -1242,6 +1354,11 @@ def page_fraud_rings() -> None:
 def page_fraud_investigation(df_scored: pd.DataFrame) -> None:
     init_manual_review_state()
     st.title("Fraud Investigation")
+
+    # ensure we have a transaction id column to key off
+    if "tx_id" not in df_scored.columns:
+        df_scored = df_scored.copy()
+        df_scored["tx_id"] = [f"TEMP-{i:06d}" for i in range(len(df_scored))]
 
     seen = st.session_state.mr_seen_ids
     mask_new = ~df_scored["tx_id"].isin(seen)
@@ -1433,20 +1550,90 @@ def page_audit_log(df_scored: pd.DataFrame) -> None:  # df_scored unused but kep
 
 
 def page_case_management() -> None:
+    init_cases_state()
     st.title("Case Management")
-    st.info(
-        "Future extension: grouping alerts and manual decisions into cases, assigning "
-        "owners, and tracking SLA / resolution notes."
-    )
+
+    cases = st.session_state.cases
+    reviewed = st.session_state.get("mr_history", pd.DataFrame())
+
+    with st.expander("Create case from reviewed transactions", expanded=not reviewed.empty):
+        if reviewed.empty:
+            st.info("No reviewed transactions yet. Process items in Fraud Investigation first.")
+        else:
+            latest = reviewed.head(20)
+            tx_choices = [f"{row.tx_id} | {row.risk_band} | {row.amount:.2f}" for _, row in latest.iterrows()]
+            selected = st.multiselect("Select reviewed transactions to attach", tx_choices, key="case_tx_select")
+            title = st.text_input("Case title", value="Fraud review case")
+            owner = st.text_input("Owner", value="Analyst A")
+            priority = st.selectbox("Priority", ["LOW", "MEDIUM", "HIGH"], index=1)
+            notes = st.text_area("Notes", value="")
+            if st.button("Create case", use_container_width=True):
+                ts = pd.Timestamp.utcnow().isoformat()
+                tx_ids = [s.split(" | ")[0] for s in selected]
+                new_case = pd.DataFrame(
+                    [
+                        {
+                            "case_id": f"CASE-{int(time.time())}",
+                            "created_at": ts,
+                            "title": title or "Case",
+                            "owner": owner or "Unassigned",
+                            "priority": priority,
+                            "status": "OPEN",
+                            "tx_ids": ", ".join(tx_ids) if tx_ids else "-",
+                            "notes": notes,
+                        }
+                    ]
+                )
+                st.session_state.cases = pd.concat([new_case, cases], axis=0).reset_index(drop=True)
+                st.success("Case created")
+                st.rerun()
+
+    st.subheader("Cases")
+    if st.session_state.cases.empty:
+        st.info("No cases yet.")
+    else:
+        st.dataframe(st.session_state.cases, use_container_width=True, height=320)
 
 # Batch Scoring (placeholder – can be upgraded later)
 
 
 def page_batch_scoring(df_scored: pd.DataFrame) -> None:  # df_scored kept for future use
     st.title("Batch Scoring")
-    st.info(
-        "Future extension: upload a CSV file, score it using the model ensemble, and "
-        "download results with risk scores and decisions."
+
+    st.write(
+        "Upload a CSV and score each transaction using the same risk logic as the dashboard. "
+        f"To keep things fast we process up to {MAX_DASHBOARD_ROWS:,} rows."
+    )
+
+    uploaded = st.file_uploader("Upload CSV", type=["csv"], key="batch_file")
+    if not uploaded:
+        st.info("Choose a CSV file to begin.")
+        return
+
+    try:
+        with st.spinner("Reading and scoring file..."):
+            df_in = pd.read_csv(uploaded, nrows=MAX_DASHBOARD_ROWS)
+            df_in = df_in.rename(columns={c: c.strip() for c in df_in.columns})
+            df_in = _standardise_columns(df_in)
+            df_scored_batch = _score_dataset_cached(df_in)
+    except Exception as exc:  # noqa: BLE001
+        st.error(f"Failed to score file: {exc}")
+        return
+
+    st.success(f"Scored {len(df_scored_batch):,} rows.")
+
+    st.subheader("Preview (first 50 rows)")
+    st.dataframe(df_scored_batch.head(50), use_container_width=True, height=320)
+
+    csv_buf = BytesIO()
+    df_scored_batch.to_csv(csv_buf, index=False)
+    csv_buf.seek(0)
+
+    st.download_button(
+        label="Download scored CSV",
+        data=csv_buf,
+        file_name="batch_scored.csv",
+        mime="text/csv",
     )
 
 # Executive Report
@@ -1514,53 +1701,58 @@ def page_what_if_simulator() -> None:
         + (", ".join(k for k, v in rules.items() if v) if any(rules.values()) else "None")
     )
 
-# Project Report (text)
+# Data Archive (store/download datasets seen in this session)
 
 
-def page_project_report() -> None:
-    st.title("Project Report")
+def page_data_archive(df_scored: pd.DataFrame) -> None:
+    st.title("Data Archive")
+    st.caption("Snapshot the scored dataset and download it along with stream/review histories.")
 
-    st.markdown(
-        """
-**System Overview**
+    # ensure storage area
+    if "stored_datasets" not in st.session_state:
+        st.session_state.stored_datasets = []
 
-- Real-time streaming of card / online transactions.  
-- Hybrid detection:
-  - anomaly score from model  
-  - business rule engine  
-- Unified risk score used to drive:
-  - real-time stream view  
-  - fraud investigation queue  
-  - 3D global fraud map  
-  - executive metrics and model lab  
+    if st.button("Snapshot current scored dataset", use_container_width=True):
+        ts = pd.Timestamp.utcnow().isoformat()
+        st.session_state.stored_datasets.append((ts, df_scored.copy()))
+        st.success(f"Stored snapshot at {ts}")
 
-This page can be used as a base to write the full IEEE project report /
-internal documentation.
-"""
-    )
+    snapshots = st.session_state.stored_datasets
+    if not snapshots:
+        st.info("No snapshots yet. Click the button to store the current view.")
+    else:
+        rows = [{"timestamp": ts, "rows": len(df)} for ts, df in snapshots]
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, height=200)
 
-# Phase 2 Plan (text)
+        sel = st.selectbox("Download snapshot", [ts for ts, _ in snapshots], index=len(snapshots) - 1)
+        snap_df = next(df for ts, df in snapshots if ts == sel)
+        buf = BytesIO()
+        snap_df.to_csv(buf, index=False)
+        buf.seek(0)
+        st.download_button("Download selected snapshot (CSV)", data=buf, file_name=f"snapshot_{sel}.csv", mime="text/csv")
 
+    st.markdown("---")
+    st.subheader("Stream history")
+    stream_hist = st.session_state.get("stream_history", pd.DataFrame())
+    if stream_hist.empty:
+        st.info("No streamed data yet.")
+    else:
+        st.dataframe(stream_hist, use_container_width=True, height=220)
+        buf2 = BytesIO()
+        stream_hist.to_csv(buf2, index=False)
+        buf2.seek(0)
+        st.download_button("Download stream history", data=buf2, file_name="stream_history.csv", mime="text/csv")
 
-def page_phase2_plan() -> None:
-    st.title("Phase 2 Plan")
-
-    st.markdown(
-        """
-Planned enhancements:
-
-1. **True ensemble with multiple ML models**  
-   - Isolation Forest, Autoencoder, Gradient Boosting.  
-2. **Fraud ring detection**  
-   - Graph analytics across cards, devices and IPs.  
-3. **Production-grade persistence**  
-   - PostgreSQL / cloud warehouse for audit log and alerts.  
-4. **User and case management**  
-   - Role-based access, case workflows, SLA tracking.  
-
-These points can be directly reused in your viva / future work section.
-"""
-    )
+    st.subheader("Manual review history")
+    mr_hist = st.session_state.get("mr_history", pd.DataFrame())
+    if mr_hist.empty:
+        st.info("No manual review actions yet.")
+    else:
+        st.dataframe(mr_hist, use_container_width=True, height=220)
+        buf3 = BytesIO()
+        mr_hist.to_csv(buf3, index=False)
+        buf3.seek(0)
+        st.download_button("Download review history", data=buf3, file_name="review_history.csv", mime="text/csv")
 
 # Real-Time Fraud Decision Pipeline (static diagram)
 
@@ -1702,82 +1894,86 @@ def main() -> None:
         else:
             col_cfg["time"] = "timestamp"
 
+    # Ensure a transaction id exists for consistent hover/tooltips across pages
+    if "tx_id" not in df_work.columns:
+        df_work["tx_id"] = [f"TX-{i:06d}" for i in range(len(df_work))]
+
     st.session_state["col_cfg"] = col_cfg
 
     if st.sidebar.checkbox("Show raw dataset preview", value=False, key="show_raw_preview"):
         st.write("✅ Dataset shape:", df_work.shape)
         st.dataframe(df_work.head())
-    df_scored = add_risk_columns(df_work)
+    with st.spinner("Scoring dataset..."):
+        df_scored = _score_dataset_cached(df_work)
 
     st.sidebar.markdown("---")
     st.sidebar.title("Navigation")
 
-    page = st.sidebar.radio(
-        "Go to",
-        (
-            "Dashboard",
-            "Real-time Stream",
-            "Live Graphs",
-            "Advanced Transaction Analysis",
-            "Threshold & Mode Tuning",
-            "Model Health & Drift",
-            "Data Explorer",
-            "Ensemble Status",
-            "Enhanced Global Fraud Network",
-            "Fraud Rings",
-            "Fraud Investigation",
-            "Rule Engine",
-            "Audit Log",
-            "Case Management",
-            "Batch Scoring",
-            "Executive Report",
-            "What-If Simulator",
-            "Project Report",
-            "Phase 2 Plan",
-            "Real-Time Fraud Decision Pipeline",
-        ),
+    pages = (
+        "Dashboard",
+        "Real-time Stream",
+        "Live Graphs",
+        "Advanced Transaction Analysis",
+        "Threshold & Mode Tuning",
+        "Model Health & Drift",
+        "Data Explorer",
+        "Ensemble Status",
+        "Enhanced Global Fraud Network",
+        "Fraud Rings",
+        "Fraud Investigation",
+        "Rule Engine",
+        "Audit Log",
+        "Case Management",
+        "Batch Scoring",
+        "Executive Report",
+        "What-If Simulator",
+        "Data Archive",
+        "Real-Time Fraud Decision Pipeline",
     )
 
-    if page == "Dashboard":
-        page_dashboard(df_scored)
-    elif page == "Real-time Stream":
-        page_real_time_stream(df_scored)
-    elif page == "Live Graphs":
-        page_live_graphs(df_scored)
-    elif page == "Advanced Transaction Analysis":
-        page_advanced_tx_analysis(df_scored)
-    elif page == "Threshold & Mode Tuning":
-        page_threshold_mode_tuning(df_scored)
-    elif page == "Model Health & Drift":
-        page_model_health_drift(df_scored)
-    elif page == "Data Explorer":
-        page_data_explorer(df_scored)
-    elif page == "Ensemble Status":
-        page_ensemble_status()
-    elif page == "Enhanced Global Fraud Network":
-        page_enhanced_global_fraud_network(df_scored)
-    elif page == "Fraud Rings":
-        page_fraud_rings()
-    elif page == "Fraud Investigation":
-        page_fraud_investigation(df_scored)
-    elif page == "Rule Engine":
-        page_rule_engine()
-    elif page == "Audit Log":
-        page_audit_log(df_scored)
-    elif page == "Case Management":
-        page_case_management()
-    elif page == "Batch Scoring":
-        page_batch_scoring(df_scored)
-    elif page == "Executive Report":
-        page_executive_report(df_scored)
-    elif page == "What-If Simulator":
-        page_what_if_simulator()
-    elif page == "Project Report":
-        page_project_report()
-    elif page == "Phase 2 Plan":
-        page_phase2_plan()
-    elif page == "Real-Time Fraud Decision Pipeline":
-        page_real_time_pipeline_diagram()
+    page = st.sidebar.radio("Go to", pages, key="nav_page")
+
+    try:
+        if page == "Dashboard":
+            page_dashboard(df_scored)
+        elif page == "Real-time Stream":
+            page_real_time_stream(df_scored)
+        elif page == "Live Graphs":
+            page_live_graphs(df_scored)
+        elif page == "Advanced Transaction Analysis":
+            page_advanced_tx_analysis(df_scored)
+        elif page == "Threshold & Mode Tuning":
+            page_threshold_mode_tuning(df_scored)
+        elif page == "Model Health & Drift":
+            page_model_health_drift(df_scored)
+        elif page == "Data Explorer":
+            page_data_explorer(df_scored)
+        elif page == "Ensemble Status":
+            page_ensemble_status()
+        elif page == "Enhanced Global Fraud Network":
+            page_enhanced_global_fraud_network(df_scored)
+        elif page == "Fraud Rings":
+            page_fraud_rings(df_scored)
+        elif page == "Fraud Investigation":
+            page_fraud_investigation(df_scored)
+        elif page == "Rule Engine":
+            page_rule_engine()
+        elif page == "Audit Log":
+            page_audit_log(df_scored)
+        elif page == "Case Management":
+            page_case_management()
+        elif page == "Batch Scoring":
+            page_batch_scoring(df_scored)
+        elif page == "Executive Report":
+            page_executive_report(df_scored)
+        elif page == "What-If Simulator":
+            page_what_if_simulator()
+        elif page == "Data Archive":
+            page_data_archive(df_scored)
+        elif page == "Real-Time Fraud Decision Pipeline":
+            page_real_time_pipeline_diagram()
+    except Exception as exc:  # noqa: BLE001
+        st.error(f"Failed to render {page}: {exc}")
 
 
 if __name__ == "__main__":

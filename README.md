@@ -76,13 +76,7 @@ Leave both flags unset/false for normal authenticated mode.
 2. Alert appears in **Alerts** and **Review Queue**.
 3. Create a case from the alert.
 4. Add notes + update status.
-5. Submit feedback and confirm audit entry.
-
-## Screenshots
-
-![Alerts](docs/images/alerts.svg)
-![Case Detail](docs/images/case-detail.svg)
-![Audit](docs/images/audit.svg)
+5. Submit feedback and confirm audit entr
 
 
 ## Repo layout

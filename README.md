@@ -54,11 +54,7 @@ Test the upload flow:
 4. Files persist on the host at `backend/data/uploads` (container path: `/app/data/uploads`).
 5. Optional: confirm persistence via `GET http://localhost:8001/datasets` (requires analyst/admin auth).
 
-## Demo credentials
 
-- **Admin:** `admin@demo` / `password`
-- **Analyst:** `analyst@demo` / `password`
-- **Viewer:** `viewer@demo` / `password`
 
 ## Public demo (read-only, no login required)
 
@@ -87,6 +83,7 @@ Leave both flags unset/false for normal authenticated mode.
 ![Alerts](docs/images/alerts.svg)
 ![Case Detail](docs/images/case-detail.svg)
 ![Audit](docs/images/audit.svg)
+
 
 ## Repo layout
 

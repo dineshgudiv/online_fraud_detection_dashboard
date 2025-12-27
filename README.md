@@ -80,9 +80,9 @@ Leave both flags unset/false for normal authenticated mode.
 
 ## Screenshots
 
-![Model Lab](docs/images/model-lab.svg)
-![Security Center](docs/images/security-center.svg)
-![Datasets](docs/images/datasets.svg)
+![Alerts](docs/images/alerts.svg)
+![Case Detail](docs/images/case-detail.svg)
+![Audit](docs/images/audit.svg)
 
 
 ## Repo layout

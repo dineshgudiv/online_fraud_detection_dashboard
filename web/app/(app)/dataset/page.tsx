@@ -1,4 +1,4 @@
-
+﻿
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -1038,13 +1038,17 @@ export default function DatasetPage() {
     const reasonCodes = Array.isArray(row.reason_codes)
       ? row.reason_codes.join(", ")
       : String(row.reason_codes ?? "");
-    const amount = row.amount ?? row.Amount ?? row.transaction_amount ?? row.amt ?? "";
-    const merchant = row.merchant_id ?? row.merchant ?? row.merchant_name ?? "";
-    const country = row.country ?? row.merchant_country ?? row.billing_country ?? "";
-    const device = row.device ?? row.device_id ?? row.device_type ?? "";
+    const amountRaw = row.amount ?? row.Amount ?? row.transaction_amount ?? row.amt ?? "";
+    const amount = Array.isArray(amountRaw) ? (amountRaw[0] ?? "") : amountRaw;
+    const merchantRaw = row.merchant_id ?? row.merchant ?? row.merchant_name ?? "";
+    const merchant = Array.isArray(merchantRaw) ? (merchantRaw[0] ?? "") : merchantRaw;
+    const countryRaw = row.country ?? row.merchant_country ?? row.billing_country ?? "";
+    const country = Array.isArray(countryRaw) ? (countryRaw[0] ?? "") : countryRaw;
+    const deviceRaw = row.device ?? row.device_id ?? row.device_type ?? "";
+    const device = Array.isArray(deviceRaw) ? (deviceRaw[0] ?? "") : deviceRaw;
 
     const extras: Record<string, string | number | null> = {
-      amount,
+      amount: amount === "" ? null : amount,
       merchant_id: merchant,
       country,
       device
@@ -1360,7 +1364,7 @@ export default function DatasetPage() {
                       onChange={(event) => setScoredThreshold(Number(event.target.value))}
                     />
                   </label>
-                  <span className="pill">>= {scoredThreshold.toFixed(2)}</span>
+                  <span className="pill">&gt;= {scoredThreshold.toFixed(2)}</span>
                   <label className="field">
                     <span>Fraud only</span>
                     <input
@@ -1728,7 +1732,7 @@ export default function DatasetPage() {
                   onChange={(event) => setResultsThreshold(Number(event.target.value))}
                 />
               </label>
-              <span className="pill">>= {resultsThreshold.toFixed(2)}</span>
+              <span className="pill">&gt;= {resultsThreshold.toFixed(2)}</span>
               <label className="field">
                 <span>Fraud only</span>
                 <input
@@ -1756,7 +1760,7 @@ export default function DatasetPage() {
                   fontWeight: 600
                 }}
               >
-                Job running — showing partial results.
+                Job running â€” showing partial results.
               </div>
             )}
             {feedbackMessage && <div className="success-banner">{feedbackMessage}</div>}
@@ -1952,3 +1956,4 @@ export default function DatasetPage() {
     </section>
   );
 }
+

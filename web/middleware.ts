@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 
 const DEMO_PUBLIC_READONLY =
   process.env.NEXT_PUBLIC_DEMO_PUBLIC_READONLY === "true";
+const DEMO_MODE = process.env.DEMO_MODE === "true";
 const PUBLIC_PATHS = new Set(["/", "/login"]);
 const DEMO_PUBLIC_PREFIXES = ["/alerts", "/audit", "/dataset", "/security"];
 
@@ -30,6 +31,9 @@ function applySecurityHeaders(response: NextResponse) {
 
 export function middleware(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
+  if (DEMO_MODE && !pathname.startsWith("/api")) {
+    return applySecurityHeaders(NextResponse.next());
+  }
   if (!pathname.startsWith("/api") && !isPublicPath(pathname)) {
     const session = request.cookies.get("session")?.value;
     if (!session) {

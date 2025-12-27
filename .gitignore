@@ -1,4 +1,4 @@
-# Byte-compiled / optimized / DLL files
+﻿# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
@@ -179,3 +179,37 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+
+# Node / Next.js
+web/node_modules/
+web/.next/
+web/out/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Local datasets and artifacts (keep data/README.md)
+data/
+!data/README.md
+backend/data/
+*.csv
+*.parquet
+
+# Local venvs and caches
+.venv/
+__pycache__/
+.pytest_cache/
+
+# Local volumes
+pgdata/
+grafana_data/
+prometheus_data/
+
+# Node / build artifacts
+node_modules/
+dist/
+build/
+.next/
+out/
+

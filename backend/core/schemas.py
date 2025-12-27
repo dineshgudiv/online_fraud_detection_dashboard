@@ -1,9 +1,60 @@
-"""Pydantic schemas for FastAPI endpoints."""
+"""API schemas for the fraud ops backend."""
+
+from __future__ import annotations
 
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Generic, List, Optional, TypeVar
 
 from pydantic import BaseModel, Field
+
+
+T = TypeVar("T")
+
+
+class ErrorResponse(BaseModel):
+    detail: str
+    code: str
+    request_id: Optional[str] = None
+
+
+class Page(BaseModel, Generic[T]):
+    page: int
+    page_size: int
+    total: int
+    items: List[T]
+
+
+class HealthOut(BaseModel):
+    status: str
+    api_version: str
+    uptime: float
+
+
+class RiskLevel(str, Enum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+
+
+class AlertStatus(str, Enum):
+    NEW = "NEW"
+    TRIAGED = "TRIAGED"
+    INVESTIGATING = "INVESTIGATING"
+    RESOLVED = "RESOLVED"
+
+
+class CaseStatus(str, Enum):
+    OPEN = "OPEN"
+    IN_REVIEW = "IN_REVIEW"
+    RESOLVED = "RESOLVED"
+
+
+class Role(str, Enum):
+    ADMIN = "ADMIN"
+    ANALYST = "ANALYST"
+    READONLY = "READONLY"
+    VIEWER = "VIEWER"
 
 
 class TransactionIn(BaseModel):
@@ -19,257 +70,290 @@ class TransactionIn(BaseModel):
     transaction_id: Optional[str] = None
 
 
-class TransactionScoreOut(BaseModel):
-    decision: str
-    risk_level: str
-    fraud_score: float
-    risk_factors: List[str]
-    recommendations: List[str]
-    model_breakdown: dict
-    transaction_id: Optional[str] = None
-    threshold_used: Optional[float] = None
-    mode_used: Optional[str] = None
-    rule_hits: Optional[List[str]] = None
-
-
-class SummaryStatsOut(BaseModel):
-    total_transactions: int
-    total_fraud: int
-    fraud_rate_percent: float
-    average_fraud_amount: float
-
-
-class StreamPoint(BaseModel):
-    timestamp: str
-    events: float
-    fraud_events: float
-
-
-class RealtimeStreamOut(BaseModel):
-    processed_events: int
-    events_per_second: float
-    error_rate: float
-    current_events_per_min: float
-    fraud_events_per_min: float
-    realtime_fraud_rate: float
-    points: List[StreamPoint]
-
-
-class CountryStatsOut(BaseModel):
-    country: str
-    total_transactions: int
-    fraud_transactions: int
-    fraud_rate: float
-    avg_fraud_score: float
-    total_amount: float
-    lat: float
-    lng: float
-    risk_level: str
-
-
-class FraudRingMember(BaseModel):
-    user_id: str
-    role: str
-    risk_score: float
-
-
-class FraudRingOut(BaseModel):
-    ring_id: str
-    risk_level: str
-    detection_method: str
-    status: str = "active"
-    detection_date: Optional[str] = None
-    total_amount: float = 0.0
-    members: List[FraudRingMember] = Field(default_factory=list)
-
-
-class FraudRingsResponse(BaseModel):
-    total_rings: int
-    critical_rings: int
-    total_amount: float
-    total_members: int
-    rings: List[FraudRingOut]
-
-
-class HealthOut(BaseModel):
-    status: str
-    api_version: str
-    uptime: float
-
-
-class ModelMetric(BaseModel):
-    name: str
-    accuracy: float
-    precision: float
-    recall: float
-    f1: float
-    auc: Optional[float] = None
-
-
-class ModelHealthOut(BaseModel):
-    overall: ModelMetric
-    models: List[ModelMetric]
-    confusion_matrix: Dict
-    class_distribution: Dict[str, int]
-
-
-class FeatureDrift(BaseModel):
-    feature: str
-    drift_score: float
-    status: str
-    p_value: Optional[float] = None
-    comment: Optional[str] = None
-
-
-class DriftReportOut(BaseModel):
-    window_size: int
-    reference_period: str
-    current_period: str
-    features: List[FeatureDrift]
-
-
-class AuditEntry(BaseModel):
-    timestamp: str
+class ScoreResponse(BaseModel):
     transaction_id: str
-    user_id: str
-    merchant_id: str
-    amount: float
-    currency: str
+    decision: str
+    risk_level: RiskLevel
+    risk_score: float
     model_name: str
-    fraud_score: float
-    risk_level: str
-    decision: str
+    model_version: str
     risk_factors: List[str]
+    alert_id: Optional[str] = None
 
 
-class AuditLogOut(BaseModel):
-    total: int
-    items: List[AuditEntry]
-
-
-class WhatIfScenarioIn(BaseModel):
-    base: TransactionIn
-    variations: List[dict]
-
-
-class WhatIfResult(BaseModel):
-    label: str
-    input: dict
-    fraud_score: float
-    risk_level: str
-    decision: str
-
-
-class WhatIfOut(BaseModel):
-    base_result: WhatIfResult
-    scenarios: List[WhatIfResult]
-
-
-class RuntimeConfig(BaseModel):
-    decision_threshold: float
-    mode: str
-    rules_enabled: bool
-
-
-class RuleCondition(BaseModel):
-    amount_gt: Optional[float] = None
-    country_in: Optional[List[str]] = None
-    hour_in: Optional[List[int]] = None
-    merchant_in: Optional[List[str]] = None
-    user_in: Optional[List[str]] = None
-
-
-class RuleAction(BaseModel):
-    set_min_score: Optional[float] = None
-    bump_score: Optional[float] = None
-    force_decision: Optional[str] = None
-    set_risk_level: Optional[str] = None
-
-
-class Rule(BaseModel):
+class AlertOut(BaseModel):
     id: str
-    enabled: bool
-    description: str
-    condition: RuleCondition
-    action: RuleAction
-    severity: str = "MEDIUM"
-
-
-class RulesOut(BaseModel):
-    items: List[Rule]
-
-
-class RulesUpdateIn(BaseModel):
-    items: List[Rule]
-
-
-class DatasetInfo(BaseModel):
-    name: str
-    path: str
-    num_rows: int
-
-
-class DatasetListOut(BaseModel):
-    active: str
-    available: List[DatasetInfo]
-
-
-class AlertEntry(BaseModel):
-    id: str
-    type: str
+    transaction_id: str
+    created_at: str
+    risk_score: float
+    risk_level: RiskLevel
+    status: AlertStatus
+    merchant_id: Optional[str] = None
     user_id: Optional[str] = None
-    transaction_id: Optional[str] = None
-    risk_level: str
-    fraud_score: float
-    decision: str
-    reason: str
+    amount: Optional[float] = None
+    currency: Optional[str] = None
+    decision: Optional[str] = None
+    reason: Optional[str] = None
+    case_id: Optional[str] = None
+
+
+class AlertUpdateIn(BaseModel):
+    status: AlertStatus
+
+
+class AlertBulkUpdateIn(BaseModel):
+    alert_ids: List[str]
+    status: AlertStatus
+
+
+class BulkUpdateOut(BaseModel):
+    updated: int
+    alert_ids: List[str]
+
+
+class NoteEntry(BaseModel):
     timestamp: str
+    author: str
+    note: str
 
 
-class AlertsOut(BaseModel):
-    total_alerts: int
-    high_risk_count: int
-    users_flagged: int
-    items: List[AlertEntry]
-
-
-# Phase 5: Case management
-class CaseStatus(str, Enum):
-    OPEN = "OPEN"
-    IN_REVIEW = "IN_REVIEW"
-    RESOLVED = "RESOLVED"
-
-
-class CaseBase(BaseModel):
-    title: str
-    user_id: Optional[str] = None
-    transaction_id: Optional[str] = None
-    risk_level: Optional[str] = None
-    fraud_score: Optional[float] = None
-    created_from_alert_id: Optional[str] = None
-    notes: Optional[str] = None
-
-
-class Case(CaseBase):
-    case_id: str
-    status: CaseStatus
+class CaseOut(BaseModel):
+    id: str
     created_at: str
     updated_at: str
+    status: CaseStatus
+    title: str
+    created_by: Optional[str] = None
+    assigned_to: Optional[str] = None
+    alert_id: Optional[str] = None
+    transaction_id: Optional[str] = None
+    user_id: Optional[str] = None
+    risk_level: Optional[RiskLevel] = None
+    risk_score: Optional[float] = None
+    notes: Optional[str] = None
+    notes_history: List[NoteEntry] = Field(default_factory=list)
 
 
-class CaseCreateIn(CaseBase):
-    pass
+class CaseCreateIn(BaseModel):
+    title: str
+    alert_id: Optional[str] = None
+    transaction_id: Optional[str] = None
+    user_id: Optional[str] = None
+    risk_level: Optional[RiskLevel] = None
+    risk_score: Optional[float] = None
+    notes: Optional[str] = None
 
 
 class CaseUpdateIn(BaseModel):
     status: Optional[CaseStatus] = None
+    assigned_to: Optional[str] = None
+    notes: Optional[str] = None
+    note: Optional[str] = None
+    note_author: Optional[str] = None
+
+
+class FeedbackIn(BaseModel):
+    alert_id: Optional[str] = None
+    case_id: Optional[str] = None
+    label: str
+    notes: Optional[str] = None
+    tx_id: Optional[str] = None
+    source: Optional[str] = None
+    job_id: Optional[str] = None
+    dataset_version_id: Optional[str] = None
+
+
+class FeedbackOut(BaseModel):
+    id: str
+    created_at: str
+    alert_id: Optional[str] = None
+    case_id: Optional[str] = None
+    reviewer: str
+    label: str
     notes: Optional[str] = None
 
 
-class CasesOut(BaseModel):
-    items: List[Case]
+class AuditEntryOut(BaseModel):
+    id: str
+    timestamp: str
+    actor: Optional[str] = None
+    user_id: Optional[str] = None
+    role: Optional[str] = None
+    action: str
+    resource_type: Optional[str] = None
+    resource_id: Optional[str] = None
+    ip: Optional[str] = None
+    user_agent: Optional[str] = None
+    correlation_id: Optional[str] = None
+    metadata: Optional[dict] = None
+    transaction_id: Optional[str] = None
+    model_name: Optional[str] = None
+    model_version: Optional[str] = None
+    score: Optional[float] = None
+    decision: Optional[str] = None
+    risk_factors: List[str] = []
+    alert_id: Optional[str] = None
+    case_id: Optional[str] = None
 
 
-class CaseOut(BaseModel):
-    case: Case
+class PaginationParams(BaseModel):
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=25, ge=1, le=200)
+
+
+class LoginIn(BaseModel):
+    email: str
+    password: str
+
+
+class RoleUpdateIn(BaseModel):
+    role: Role
+
+
+class AuthTokenOut(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+class UserOut(BaseModel):
+    id: str
+    email: str
+    role: Role
+
+
+class GeoSummaryItem(BaseModel):
+    label: str
+    count: int
+    high_risk_count: int = 0
+    total_amount: Optional[float] = None
+
+
+class GeoSummaryOut(BaseModel):
+    group_by: str
+    items: List[GeoSummaryItem]
+
+
+class ReviewDecision(str, Enum):
+    APPROVE = "APPROVE"
+    REJECT = "REJECT"
+
+
+class ReviewQueueItem(BaseModel):
+    id: str
+    source: str
+    title: str
+    status: str
+    risk_level: Optional[RiskLevel] = None
+    risk_score: Optional[float] = None
+    transaction_id: Optional[str] = None
+    assigned_to: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ReviewDecisionIn(BaseModel):
+    decision: ReviewDecision
+    notes: Optional[str] = None
+
+
+class ReviewDecisionOut(BaseModel):
+    id: str
+    source: str
+    status: str
+    message: str
+
+
+class ModelMetric(BaseModel):
+    name: str
+    value: Optional[float] = None
+    unit: Optional[str] = None
+    available: bool
+    note: Optional[str] = None
+
+
+class ModelMetricsOut(BaseModel):
+    model_name: str
+    model_version: str
+    metrics: List[ModelMetric]
+
+
+class RetrainJobOut(BaseModel):
+    id: str
+    status: str
+    requested_by: Optional[str] = None
+    requested_at: Optional[str] = None
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    error_message: Optional[str] = None
+    model_name: Optional[str] = None
+    model_version: Optional[str] = None
+    duration_seconds: Optional[float] = None
+
+
+class DatasetLineageOut(BaseModel):
+    id: str
+    version: str
+    created_at: str
+    source: Optional[str] = None
+
+
+class FeatureSetLineageOut(BaseModel):
+    id: str
+    version: str
+    schema_hash: str
+    created_at: str
+
+
+class ModelVersionLineageOut(BaseModel):
+    version: str
+    trained_at: str
+    metrics: Optional[dict] = None
+
+
+class RetrainJobLineageOut(BaseModel):
+    id: str
+    status: str
+    requested_by: Optional[str] = None
+    requested_at: Optional[str] = None
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    error_message: Optional[str] = None
+
+
+class LineageOut(BaseModel):
+    model: Optional[ModelVersionLineageOut] = None
+    dataset: Optional[DatasetLineageOut] = None
+    feature_set: Optional[FeatureSetLineageOut] = None
+    retrain_job: Optional[RetrainJobLineageOut] = None
+
+
+class DriftPoint(BaseModel):
+    timestamp: str
+    overall_score: float
+
+
+class DriftFeatureOut(BaseModel):
+    feature: str
+    psi: float
+    ks_pvalue: Optional[float] = None
+
+
+class DriftSummaryOut(BaseModel):
+    level: str
+    message: str
+    overall: List[DriftPoint]
+    top_features: List[DriftFeatureOut]
+
+
+class PipelineStatusOut(BaseModel):
+    status: str
+    source: str
+    last_ingest_at: Optional[str] = None
+    alerts_total: int
+    high_risk_alerts: int
+    cases_total: int
+    open_cases: int
+    prometheus_enabled: bool = False
+    prometheus_url: Optional[str] = None
+
 

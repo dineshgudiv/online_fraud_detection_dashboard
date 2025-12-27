@@ -1,0 +1,184 @@
+﻿services:
+  db:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: fraud
+      POSTGRES_USER: fraud
+      POSTGRES_PASSWORD: fraud
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fraud -d fraud"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+      start_period: 30s
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+      start_period: 30s
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://fraud:fraud@db:5432/fraud
+      REDIS_URL: redis://redis:6379/0
+      RQ_QUEUES: "retrain,default"
+      CORS_ALLOWLIST: "http://localhost:5173,http://127.0.0.1:5173"
+      JWT_SECRET: dev-secret
+      SEED_DEMO_DATA: "true"
+      DEMO_PUBLIC_READONLY: "true"
+      SECURITY_DEMO_MODE: "true"
+      MODEL_DEMO_MODE: "true"
+      PHASE2_DEMO_MODE: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./backend/data:/app/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "import urllib.request,sys;sys.exit(0) if urllib.request.urlopen('http://127.0.0.1:8000/health').getcode()==200 else sys.exit(1)"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+      start_period: 30s
+  worker:
+    build: ./backend
+    restart: unless-stopped
+    command: ["python", "worker.py"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://fraud:fraud@db:5432/fraud
+      REDIS_URL: redis://redis:6379/0
+      RQ_QUEUES: "retrain,default"
+      SECURITY_DEMO_MODE: "true"
+      MODEL_DEMO_MODE: "true"
+      PHASE2_DEMO_MODE: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/data:/app/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "import os; from redis import Redis; url=os.getenv('REDIS_URL','redis://redis:6379/0'); Redis.from_url(url).ping()"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  drift-scheduler:
+    build: ./backend
+    restart: unless-stopped
+    command: ["python", "scheduler.py"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://fraud:fraud@db:5432/fraud
+      REDIS_URL: redis://redis:6379/0
+      DRIFT_INTERVAL_SECONDS: "3600"
+      MODEL_DEMO_MODE: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backend/data:/app/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "import os; from sqlalchemy import create_engine; url=os.getenv('DATABASE_URL','postgresql+psycopg://fraud:fraud@db:5432/fraud'); engine=create_engine(url, connect_args={'connect_timeout':2}); conn=engine.connect(); conn.close()"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build: ./web
+    restart: unless-stopped
+    command: ["npm", "run", "dev", "--", "-H", "0.0.0.0", "-p", "5173"]
+    environment:
+      NEXT_PUBLIC_API_BASE: http://127.0.0.1:8001
+      NEXT_PUBLIC_API_BASE_URL: http://127.0.0.1:8001
+      NEXT_PUBLIC_DEMO_PUBLIC_READONLY: "true"
+      API_BASE: http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "5173:5173"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5173/ >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 20s
+      retries: 30
+      start_period: 20s
+  prometheus:
+    image: prom/prometheus:v2.51.2
+    restart: unless-stopped
+    profiles:
+      - monitoring
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=1d"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:9090/-/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+      start_period: 30s
+  grafana:
+    image: grafana/grafana-oss:10.4.3
+    restart: unless-stopped
+    profiles:
+      - monitoring
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+      start_period: 30s
+volumes:
+  pgdata:
+  grafana_data:
+  prometheus_data:

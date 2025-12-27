@@ -1,4 +1,0 @@
-Transaction ID,User,Amount,Risk Score,Status,fraud_score,risk_level,decision
-TXN-93214,U305,2450.75,0.91,High,0.188,LOW,APPROVED
-TXN-92141,U108,830.42,0.74,Medium,0.188,LOW,APPROVED
-TXN-93841,U502,58.3,0.12,Normal,0.188,LOW,APPROVED

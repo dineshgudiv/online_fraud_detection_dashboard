@@ -184,6 +184,8 @@ cython_debug/
 web/node_modules/
 web/.next/
 web/out/
+!web/lib/
+!web/lib/**
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
